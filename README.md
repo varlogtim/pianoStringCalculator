@@ -12,7 +12,7 @@ The relationships:
 - for given length and constant tension, frequency varies inversely as the square root of the mass/unit length
 
 We would like to calculate ideal, as well as, practical string guage for each string given:
-- The note of the string
+- The frquency which produces the correct note of the string(s)
 - The mass of the string material
 - The length of the string (fixed)
 - The ideal range of tension. Assuming 160 - 220 lbs ... I only have rough understanding of this.
