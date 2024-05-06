@@ -35,7 +35,7 @@ from collections import namedtuple
 # OK, I am just taking the pianomaker website at their word about this following formulas.
 # XXX TODO: Seriously, spend the time to algebra this out on paper so that you understand.
 #
-# t = (fld)**2/K
+# t = ((fld)**2)/K
 # d = sqrt(Kt)/fl
 #
 LBF_DYNES = 444_822.168
@@ -84,8 +84,6 @@ A4_idx = list(NOTE_FREQ_OF_PIANO.keys()).index("A4")
 for idx, note in enumerate(NOTE_FREQ_OF_PIANO.keys()):
     NOTE_FREQ_OF_PIANO[note] = SEMITONE_OFFSET(A4_FREQUENCY, idx - A4_idx)
 
-
-
 #
 # Roslau Steel Wire for Piano Strings
 #
@@ -118,7 +116,7 @@ ROSLAU_WIRES = [
     WireSpec(size=22,   diameter_mm=1.225, weight_kg_km=9.25),
 ]
 ROSLAU_RELATIVE_DENSITY = 7.84  # grams per cubic cm
-IDEAL_TENSION = 180  # foot pounds
+IDEAL_TENSION = 170  # foot pounds
 
 PianoHarpString = namedtuple("PianoString", ["speaking_length_cm", "note"])
 
@@ -193,35 +191,98 @@ PIANO_HARP_STRINGS = [
 def find_conversion_factor(relative_density_g_cm3):
     return LBF_DYNES / (relative_density_g_cm3 * math.pi)
 
-def find_ideal_diameter_cm(string: PianoHarpString):
-    k = LBF_DYNES / (ROSLAU_RELATIVE_DENSITY * math.pi)
-    d = math.sqrt(k * IDEAL_TENSION) / (NOTE_FREQ_OF_PIANO[string.note] * string.speaking_length_cm)
-    return d
-
 # Finding relative density of Rosleau steal piano wire.
 def find_relative_density(string: WireSpec):  # yields r (rho)
     weight_g_cm = string.weight_kg_km / 100  # 100,000 (cm in km) over 1000 (g in kg)
     radius_cm = (string.diameter_mm / 10) / 2
     volume_cm3 = math.pi * radius_cm ** 2  # one cm long
     relative_density_g_cm3 = weight_g_cm / volume_cm3
-    # print(f"size: {string.size}, volume_cm3: {volume_cm3}, weight_g_cm: {weight_g_cm}, relative_density_g_cm3: {relative_density_g_cm3}, K={find_conversion_factor(relative_density_g_cm3)}")
-    # The average is 7.84 +-0.005 grams per cubic centimeter... so.
+    print(
+        f"size: {string.size}, volume_cm3: {volume_cm3}, weight_g_cm: {weight_g_cm}, "
+        f"relative_density_g_cm3: {relative_density_g_cm3}, "
+        f"K={find_conversion_factor(relative_density_g_cm3)}"
+    )
+    # XXX The average is 7.84 +-0.005 grams per cubic centimeter... so, just going to define a const
     return relative_density_g_cm3
 
+def find_ideal_diameter_mm(string: PianoHarpString):
+    # Calc in cm
+    k = LBF_DYNES / (ROSLAU_RELATIVE_DENSITY * math.pi)
+    d = math.sqrt(k * IDEAL_TENSION) / (NOTE_FREQ_OF_PIANO[string.note] * string.speaking_length_cm)
+    return d * 10  # return in mm
 
-# OK, need to define all put all the strings
+def find_tension(string: PianoHarpString, diameter_mm: float):
+    # t = ((fld)**2)/K
+    k = LBF_DYNES / (ROSLAU_RELATIVE_DENSITY * math.pi)
+    speaking_length_mm = string.speaking_length_cm / 10
+    return (
+        ((NOTE_FREQ_OF_PIANO[string.note] * speaking_length_mm * diameter_mm) ** 2) / k
+    )
 
+
+def find_best_match_string(
+        string: PianoHarpString,
+) -> (int, float, float):  # wire_idx, tension_diff, tension
+
+    # Algo:
+    # Iter up from start_wire_idx, find smallest tension_diff
+    # I assert that the absolute value of the tension_diff will be parabolic.
+    # Therefore, we need to compare to the previous tension diff and once it increases, stop.
+
+    ideal_diameter_mm = find_ideal_diameter_mm(string)
+    ideal_tension = find_tension(string, ideal_diameter_mm)
+
+    prev_tension = None
+    prev_tension_diff = None
+
+    for idx in range(0, len(ROSLAU_WIRES)):
+        # Since we are increasing, the tension will always increase.
+        wire_diameter_mm = ROSLAU_WIRES[idx].diameter_mm
+        tension = find_tension(string, wire_diameter_mm)
+        tension_diff = math.fabs(ideal_tension - tension)
+        # print(f"str_idx: {idx}: wire_diameter_mm: {wire_diameter_mm}, "
+        #       f"tension: {tension}, tension_diff: {tension_diff}")
+
+        if prev_tension_diff is None:
+            prev_tension_diff = tension_diff
+            continue
+
+        if tension_diff > prev_tension_diff:
+            idx = idx - 1
+            break
+
+        prev_tension_diff = tension_diff
+        prev_tension = tension
+        # if we reach the end, that has to be it.
+    return idx, prev_tension, prev_tension_diff
+
+    
 
 
 def main() -> None:
-    for idx, (note, freq) in enumerate(NOTE_FREQ_OF_PIANO.items()):
-        print(f"{idx}: {note}: {freq:.2f}")
-    # print(f"UP: {SEMITONE_UP(440)}")
-    # print(f"DOWN: {SEMITONE_DOWN(440)}")
+    # for idx, (note, freq) in enumerate(NOTE_FREQ_OF_PIANO.items()):
+    #     print(f"{idx}: {note}: {freq:.2f}")
+    for string_idx in range(START_OF_PLAIN_STRINGS, 88):
+        string = PIANO_HARP_STRINGS[string_idx]
+        practical_wire_spec_idx, tension, tension_diff = find_best_match_string(string)
+        print(
+            f"{string.note}({string_idx + 1}): wire_size: {ROSLAU_WIRES[practical_wire_spec_idx].size}, "
+            f"tension: {tension:.02f}, tension_diff: {tension_diff:.02f}"
+        )
+        # print(
+        #     f"{string_idx + 1}: {string}: {find_ideal_diameter_mm(string)}, "
+        #     f"tension: {find_tension(string, find_ideal_diameter_mm(string))}, "
+        #     f"wire_spec: {ROSLAU_WIRES[practical_wire_spec_idx]}, tension: {tension}, "
+        #     f"tension_diff: {tension_diff}"
+        # )
+
+    # find_best_match_string(PIANO_HARP_STRINGS[87])
+    # find_best_match_string(PIANO_HARP_STRINGS[86])
+    # find_best_match_string(PIANO_HARP_STRINGS[56])
+    # find_best_match_string(PIANO_HARP_STRINGS[76])
+    # find_best_match_string(PIANO_HARP_STRINGS[46])
+    
+
 
 if __name__ == "__main__":
     main()
-    for wire in ROSLAU_WIRES:
-        find_relative_density(wire)
-    for string in PIANO_HARP_STRINGS:
-        print(f"{string}: {find_ideal_diameter_cm(string)}")
